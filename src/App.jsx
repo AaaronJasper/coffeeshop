@@ -77,30 +77,54 @@ export default function App() {
     const [archivedOrders, setArchivedOrders] = useState([]);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState(null);
-    const [orders, setOrders] = useState([
-        {
-            id: "#0001",
-            status: "accepted",
-            orderTime: "13:21",
-            items: ["1 x Americano (L)", "1 x Cappuccino (L)", "1 x Americano with milk"],
-        },
-        {
-            id: "#0002",
-            status: "in-progress",
-            orderTime: "13:27",
-            items: ["1 x Latte (L)", "1 x Cappuccino (L)"],
-        },
-        {
-            id: "#0003",
-            status: "ready",
-            orderTime: "13:39",
-            items: ["1 x Mocha (L)", "1 x Hot Chocolate (L)"],
-        },
-    ]);
+    const [orders, setOrders] = useState([]);
+
+    useEffect(() => {
+        fetch("/api/staff/orders")
+            .then((res) => res.json())
+            .then((data) => {
+                console.log("RAW:", data);
+
+                const formatted = data.map(order => ({
+
+                        id: `#${order.id}`,
+                        status: mapStatus(order.status),
+
+
+                        orderTime: new Date(order.orderTime).toLocaleTimeString(),
+
+
+                        items: order.items?.map(item =>
+                            `${item.quantity} x ${item.size} ($${item.unitPrice})`
+                        ) || []
+                    }));
+
+                console.log("FORMATTED:", formatted);
+                setOrders(formatted);
+            })
+            .catch((error) => console.error("Failed to load orders:", error));
+    }, []);
+
+
     const filteredOrders =
         activeTab === "all"
             ? orders
             : orders.filter((order) => order.status === activeTab);
+    function mapStatus(status) {
+        switch (status) {
+            case "NEW":
+            case "ACCEPTED":
+                return "accepted";
+            case "PREPARING":
+                return "in-progress";
+            case "READY":
+                return "ready";
+            case "CANCELLED":
+                return "cancelled";
+            default:
+                return "accepted";
+        }
+    }
     function updateStatus(id, newStatus) {
         if (newStatus === "archived") {
             const orderToArchive = orders.find((order) => order.id === id);
