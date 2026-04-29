@@ -2,6 +2,19 @@ import { useState, useEffect } from "react";
 import "./App.css";
 import { FiUnlock } from "react-icons/fi";
 
+async function apiFetch(path, options = {}) {
+    const token = localStorage.getItem("staffToken");
+    const headers = { "Content-Type": "application/json", ...options.headers };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(path, { ...options, headers });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || res.statusText);
+    }
+    if (res.status === 204) return null;
+    return res.json();
+}
+
 
 function OrderCard({ order, updateStatus, isArchive, isAllView, onClick  }) {
     return (
@@ -75,9 +88,18 @@ export function App() {
     const [view, setView] = useState("staff");
     const [activeTab, setActiveTab] = useState("all");
     const [archivedOrders, setArchivedOrders] = useState([]);
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem("staffToken"));
     const [selectedOrder, setSelectedOrder] = useState(null);
     const [orders, setOrders] = useState([]);
+
+    // auth form state
+    const [authTab, setAuthTab] = useState("login"); // "login" | "register"
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [firstname, setFirstname] = useState("");
+    const [lastname, setLastname] = useState("");
+    const [authError, setAuthError] = useState("");
+    const [authLoading, setAuthLoading] = useState(false);
 
     useEffect(() => {
         fetch("/api/staff/orders")
@@ -190,32 +212,156 @@ export function App() {
     }
 
 
+    async function handleLogin(e) {
+        e.preventDefault();
+        setAuthError("");
+        setAuthLoading(true);
+        try {
+            const data = await apiFetch("/api/v1/auth/authenticate", {
+                method: "POST",
+                body: JSON.stringify({ email, password }),
+            });
+            if (data.role !== "STAFF") {
+                setAuthError("Access denied. Staff accounts only.");
+                return;
+            }
+            localStorage.setItem("staffToken", data.token);
+            setIsLoggedIn(true);
+        } catch {
+            setAuthError("Invalid email or password.");
+        } finally {
+            setAuthLoading(false);
+        }
+    }
+
+    async function handleRegister(e) {
+        e.preventDefault();
+        setAuthError("");
+        setAuthLoading(true);
+        try {
+            const data = await apiFetch("/api/v1/auth/register", {
+                method: "POST",
+                body: JSON.stringify({ firstname, lastname, email, password, role: "STAFF" }),
+            });
+            localStorage.setItem("staffToken", data.token);
+            setIsLoggedIn(true);
+        } catch {
+            setAuthError("Registration failed. Email may already be in use.");
+        } finally {
+            setAuthLoading(false);
+        }
+    }
+
+    async function handleLogout() {
+        const token = localStorage.getItem("staffToken");
+        if (token) {
+            await fetch("/api/v1/auth/logout", {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            }).catch(() => {});
+        }
+        localStorage.removeItem("staffToken");
+        setIsLoggedIn(false);
+        setEmail("");
+        setPassword("");
+        setFirstname("");
+        setLastname("");
+    }
+
     if (!isLoggedIn) {
         return (
             <div className="login-page">
                 <div className="login-card">
-                    <h1>Staff Login</h1>
-                    <p>Administrative & Staff Access</p>
+                    <h1>Group 8 Cafe</h1>
+                    <p>Staff Portal</p>
 
-                    <hr/>
+                    <div className="auth-tabs">
+                        <button
+                            className={authTab === "login" ? "active" : ""}
+                            onClick={() => { setAuthTab("login"); setAuthError(""); }}
+                        >
+                            Login
+                        </button>
+                        <button
+                            className={authTab === "register" ? "active" : ""}
+                            onClick={() => { setAuthTab("register"); setAuthError(""); }}
+                        >
+                            Register
+                        </button>
+                    </div>
 
-                    <label>Account Number </label>
-                    <input type="account number"
-                           placeholder="Enter your account number"/>
-                    <label>Password </label>
-                    <input type="password"
-                           placeholder="Enter your password"/>
+                    <hr />
 
-                    <button onClick={() => setIsLoggedIn(true)}>
-                        Login
-                    </button>
+                    {authTab === "login" ? (
+                        <form onSubmit={handleLogin}>
+                            <label>Email</label>
+                            <input
+                                type="email"
+                                placeholder="staff@example.com"
+                                value={email}
+                                onChange={e => setEmail(e.target.value)}
+                                required
+                            />
+                            <label>Password</label>
+                            <input
+                                type="password"
+                                placeholder="Enter your password"
+                                value={password}
+                                onChange={e => setPassword(e.target.value)}
+                                required
+                            />
+                            {authError && <p className="auth-error">{authError}</p>}
+                            <button type="submit" disabled={authLoading}>
+                                {authLoading ? "Signing in..." : "Login"}
+                            </button>
+                        </form>
+                    ) : (
+                        <form onSubmit={handleRegister}>
+                            <label>First Name</label>
+                            <input
+                                type="text"
+                                placeholder="First name"
+                                value={firstname}
+                                onChange={e => setFirstname(e.target.value)}
+                                required
+                            />
+                            <label>Last Name</label>
+                            <input
+                                type="text"
+                                placeholder="Last name"
+                                value={lastname}
+                                onChange={e => setLastname(e.target.value)}
+                                required
+                            />
+                            <label>Email</label>
+                            <input
+                                type="email"
+                                placeholder="staff@example.com"
+                                value={email}
+                                onChange={e => setEmail(e.target.value)}
+                                required
+                            />
+                            <label>Password</label>
+                            <input
+                                type="password"
+                                placeholder="Choose a password"
+                                value={password}
+                                onChange={e => setPassword(e.target.value)}
+                                required
+                            />
+                            {authError && <p className="auth-error">{authError}</p>}
+                            <button type="submit" disabled={authLoading}>
+                                {authLoading ? "Registering..." : "Create Staff Account"}
+                            </button>
+                        </form>
+                    )}
                 </div>
             </div>
         );
     }
     return (
         <div className="container">
-            <h1 className="header">Whistlestop Coffee Hut</h1>
+            <h1 className="header">Group 8 Cafe</h1>
 
             <div className="switch-buttons">
                 <button onClick={() => setView("staff")}
@@ -309,7 +455,7 @@ export function App() {
 
             <button
                 className="logout-btn"
-                onClick={() => setIsLoggedIn(false)}>
+                onClick={handleLogout}>
                 <FiUnlock />
                 Logout
             </button>
