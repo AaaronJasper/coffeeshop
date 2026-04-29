@@ -11,7 +11,7 @@ function OrderCard({ order, updateStatus, isArchive, isAllView, onClick  }) {
             onClick={isAllView ? onClick : undefined}>
 
             <div className="order-card-header">
-                <h3>Order {order.id}</h3>
+                <h3>Order {order.displayId || `#${order.id}`}</h3>
                 <span className="ordertime">{order.orderTime}</span>
             </div>
 
@@ -28,50 +28,50 @@ function OrderCard({ order, updateStatus, isArchive, isAllView, onClick  }) {
             )}
 
             <p className="item-count">{order.items.length} items</p>
-            {!isAllView && (
+            {!isAllView && !isArchive && (
                 <>
-            <div className="card-actions">
-                {order.status === "accepted" && (
-                    <button onClick={() => updateStatus(order.id, "in-progress")}>
-                        Start preparing
-                    </button>
-                )}
+                    <div className="card-actions">
+                        {order.backendStatus === "NEW" && (
+                            <button onClick={() => updateStatus(order.id, "accepted")}>
+                                Accept order
+                            </button>
+                        )}
 
-                {order.status === "in-progress" && (
-                    <button onClick={() => updateStatus(order.id, "ready")}>
-                        Mark as ready
-                    </button>
-                )}
+                        {order.backendStatus === "ACCEPTED" && (
+                            <button onClick={() => updateStatus(order.id, "in-progress")}>
+                                Start preparing
+                            </button>
+                        )}
 
+                        {order.backendStatus === "PREPARING" && (
+                            <button onClick={() => updateStatus(order.id, "ready")}>
+                                Mark as ready
+                            </button>
+                        )}
 
-                {!isArchive && order.status === "ready" && (
-                    <button onClick={() => updateStatus(order.id, "archived")}>
-                        Collect
-                    </button>
-                )}
+                        {order.backendStatus === "READY" && (
+                            <button onClick={() => updateStatus(order.id, "archived")}>
+                                Collect
+                            </button>
+                        )}
+                    </div>
 
-
-            </div>
-            {!isArchive && order.status !== "cancelled" && (
-                <button
-                    className="cancel-btn"
-                    onClick={() => updateStatus(order.id, "cancelled")}
-                >
-                    Cancel
-                </button>
-            )}
+                    {order.backendStatus !== "cancelled" && (
+                        <button
+                            className="cancel-btn"
+                            onClick={() => updateStatus(order.id, "cancelled")}
+                        >
+                            Cancel
+                        </button>
+                    )}
                 </>
-
             )}
         </div>
     );
 }
 
 
-
-
-/* Whistlestop Coffee Hut nav */
-export default function App() {
+export function App() {
     const [view, setView] = useState("staff");
     const [activeTab, setActiveTab] = useState("all");
     const [archivedOrders, setArchivedOrders] = useState([]);
@@ -87,17 +87,15 @@ export default function App() {
 
                 const formatted = data.map(order => ({
 
-                        id: `#${order.id}`,
-                        status: mapStatus(order.status),
-
-
-                        orderTime: new Date(order.orderTime).toLocaleTimeString(),
-
-
-                        items: order.items?.map(item =>
-                            `${item.quantity} x ${item.size} ($${item.unitPrice})`
-                        ) || []
-                    }));
+                    id: order.id,
+                    displayId: `#${order.id}`,
+                    backendStatus: order.status,
+                    status: mapStatus(order.status),
+                    orderTime: new Date(order.orderTime).toLocaleTimeString(),
+                    items: order.items?.map(item =>
+                        `${item.quantity} x ${item.menuItem?.name} (${item.size})`
+                    ) || []
+                }));
 
                 console.log("FORMATTED:", formatted);
                 setOrders(formatted);
@@ -105,11 +103,37 @@ export default function App() {
             .catch((error) => console.error("Failed to load orders:", error));
     }, []);
 
+    useEffect(() => {
+        if (view === "archive") {
+            fetch("/api/staff/orders/archive")
+                .then(res => res.json())
+                .then(data => {
+                    const formatted = data.map(order => ({
+                        id: order.id,
+                        displayId: `#${order.id}`,
+                        backendStatus: order.status,
+                        status: mapStatus(order.status),
+                        orderTime: new Date(order.orderTime).toLocaleTimeString(),
+                        items: order.items?.map(
+                            item => `${item.quantity} x ${item.menuItem?.name} (${item.size})`
+                        ) || []
+                    }));
+
+                    setArchivedOrders(formatted);
+                })
+                .catch(err => console.error(err));
+        }
+    }, [view]);
+
+
+    const currentOrders =
+        view === "archive" ? archivedOrders : orders;
 
     const filteredOrders =
         activeTab === "all"
-            ? orders
-            : orders.filter((order) => order.status === activeTab);
+            ? currentOrders
+            : currentOrders.filter((order) => order.status === activeTab);
+
     function mapStatus(status) {
         switch (status) {
             case "NEW":
@@ -119,46 +143,68 @@ export default function App() {
                 return "in-progress";
             case "READY":
                 return "ready";
+            case "COLLECTED":
+                return "completed";
             case "CANCELLED":
                 return "cancelled";
             default:
-                return "accepted";
+                return "unknown";
         }
     }
-    function updateStatus(id, newStatus) {
-        if (newStatus === "archived") {
-            const orderToArchive = orders.find((order) => order.id === id);
-            const updatedOrder = {
-                ...orderToArchive,
-                status: "completed"
-            };
-            setArchivedOrders([...archivedOrders, updatedOrder]);
-            setOrders(orders.filter((order) => order.id !== id));
-            return;
-        }
 
-        setOrders(
-            orders.map((order) =>
-                order.id === id ? { ...order, status: newStatus } : order
-            )
-        );
+    function updateStatus(id, newStatus) {
+        const statusMap = {
+            accepted: "ACCEPTED",
+            "in-progress": "PREPARING",
+            ready: "READY",
+            cancelled: "CANCELLED",
+            archived: "COLLECTED",
+        };
+
+        const backendStatus = statusMap[newStatus];
+
+        fetch(`/api/staff/orders/${id}/status?status=${backendStatus}`, {
+            method: "PATCH",
+        })
+            .then(() => {
+                return fetch("/api/staff/orders");
+            })
+            .then((res) => res.json())
+            .then((data) => {
+                const formatted = data.map((order) => ({
+                    id: order.id,
+                    displayId: `#${order.id}`,
+                    backendStatus: order.status,
+                    status: mapStatus(order.status),
+                    orderTime: new Date(order.orderTime).toLocaleTimeString(),
+                    items:
+                        order.items?.map(
+                            (item) =>
+                                `${item.quantity} x ${item.menuItem?.name} (${item.size})`
+                        ) || [],
+                }));
+
+                setOrders(formatted);
+            })
+            .catch((err) => console.error("Failed to update status:", err));
     }
+
 
     if (!isLoggedIn) {
         return (
             <div className="login-page">
                 <div className="login-card">
-                <h1>Staff Login</h1>
+                    <h1>Staff Login</h1>
                     <p>Administrative & Staff Access</p>
 
-                    <hr />
+                    <hr/>
 
-                <label>Account Number </label>
-                <input type="account number"
-                       placeholder="Enter your account number" />
-                <label>Password </label>
-                 <input type="password"
-                        placeholder="Enter your password"/>
+                    <label>Account Number </label>
+                    <input type="account number"
+                           placeholder="Enter your account number"/>
+                    <label>Password </label>
+                    <input type="password"
+                           placeholder="Enter your password"/>
 
                     <button onClick={() => setIsLoggedIn(true)}>
                         Login
@@ -183,10 +229,12 @@ export default function App() {
                 </button>
             </div>
 
-            {view === "staff" ? (
-                <>
+
+
 
                     <div className="tabs">
+                        {view === "staff" && (
+                            <>
                         <button
                             onClick={() => setActiveTab("all")}
                             className={activeTab === "all" ? "active" : ""}
@@ -215,45 +263,49 @@ export default function App() {
                             Ready for Collection
                         </button>
 
+                    </>
+                    )}
+
+                    {view === "archive" && (
+                        <>
                         <button
-                            onClick={() => setActiveTab("cancelled")}
-                            className={`nav ${activeTab === "cancelled" ? "active" : ""}`}
+                            onClick={() => setActiveTab("all")}
+                            className={activeTab === "all" ? "active" : ""}
                         >
-                            Cancelled
+                            All
                         </button>
 
+                            <button
+                                onClick={() => setActiveTab("completed")}
+                                className={activeTab === "completed" ? "active" : ""}
+                            >
+                                Completed
+                            </button>
 
+                            <button
+                                onClick={() => setActiveTab("cancelled")}
+                                className={activeTab === "cancelled" ? "active" : ""}
+                            >
+                                Cancelled
+                            </button>
+                        </>
+                    )}
                     </div>
 
-                    <div className="order-grid">
-                        {filteredOrders.map((order) => (
-                            <OrderCard key={order.id}
-                                       order={order}
-                                       updateStatus={updateStatus}
-                                       isArchive={false}
-                                       isAllView={activeTab === "all"}
-                                       onClick={() => setSelectedOrder(order)}
-                            />
+                <div className="order-grid">
+                    {filteredOrders.map((order) => (
+                        <OrderCard key={order.id}
+                                   order={order}
+                                   updateStatus={updateStatus}
+                                   isArchive={view === "archive"}
+                                   isAllView={view === "staff" && activeTab === "all"}
+                                   onClick={() => setSelectedOrder(order)}
+                        />
 
-                        ))}
-                    </div>
-                </>
-            ) : (
-                <>
+                    ))}
+                </div>
 
-                    <div className="order-grid">
-                        {archivedOrders.map((order) => (
-                            <OrderCard
-                                key={order.id}
-                                order={order}
-                                updateStatus={updateStatus}
-                                isArchive={true}
-                                isAllView={false}
-                            />
-                        ))}
-                    </div>
-                </>
-            )}
+
 
             <button
                 className="logout-btn"
