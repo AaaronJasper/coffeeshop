@@ -101,28 +101,30 @@ export function App() {
     const [authError, setAuthError] = useState("");
     const [authLoading, setAuthLoading] = useState(false);
 
-    useEffect(() => {
+    function formatOrders(data) {
+        return data.map(order => ({
+            id: order.id,
+            displayId: `#${order.id}`,
+            backendStatus: order.status,
+            status: mapStatus(order.status),
+            orderTime: new Date(order.orderTime).toLocaleTimeString(),
+            items: order.items?.map(item =>
+                `${item.quantity} x ${item.menuItem?.name} (${item.size})`
+            ) || []
+        }));
+    }
+
+    function fetchActiveOrders() {
         fetch("/api/staff/orders")
             .then((res) => res.json())
-            .then((data) => {
-                console.log("RAW:", data);
-
-                const formatted = data.map(order => ({
-
-                    id: order.id,
-                    displayId: `#${order.id}`,
-                    backendStatus: order.status,
-                    status: mapStatus(order.status),
-                    orderTime: new Date(order.orderTime).toLocaleTimeString(),
-                    items: order.items?.map(item =>
-                        `${item.quantity} x ${item.menuItem?.name} (${item.size})`
-                    ) || []
-                }));
-
-                console.log("FORMATTED:", formatted);
-                setOrders(formatted);
-            })
+            .then((data) => setOrders(formatOrders(data)))
             .catch((error) => console.error("Failed to load orders:", error));
+    }
+
+    useEffect(() => {
+        fetchActiveOrders();
+        const interval = setInterval(fetchActiveOrders, 10000);
+        return () => clearInterval(interval);
     }, []);
 
     useEffect(() => {
@@ -188,26 +190,7 @@ export function App() {
         fetch(`/api/staff/orders/${id}/status?status=${backendStatus}`, {
             method: "PATCH",
         })
-            .then(() => {
-                return fetch("/api/staff/orders");
-            })
-            .then((res) => res.json())
-            .then((data) => {
-                const formatted = data.map((order) => ({
-                    id: order.id,
-                    displayId: `#${order.id}`,
-                    backendStatus: order.status,
-                    status: mapStatus(order.status),
-                    orderTime: new Date(order.orderTime).toLocaleTimeString(),
-                    items:
-                        order.items?.map(
-                            (item) =>
-                                `${item.quantity} x ${item.menuItem?.name} (${item.size})`
-                        ) || [],
-                }));
-
-                setOrders(formatted);
-            })
+            .then(() => fetchActiveOrders())
             .catch((err) => console.error("Failed to update status:", err));
     }
 
