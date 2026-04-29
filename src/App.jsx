@@ -255,7 +255,7 @@ export function App() {
         return (
             <div className="login-page">
                 <div className="login-card">
-                    <h1>Group 8 Cafe</h1>
+                    <h1>Whistlestop Coffee Hut</h1>
                     <p>Staff Portal</p>
 
                     <div className="auth-tabs">
@@ -344,7 +344,7 @@ export function App() {
     }
     return (
         <div className="container">
-            <h1 className="header">Group 8 Cafe</h1>
+            <h1 className="header">Whistlestop Coffee Hut</h1>
 
             <div className="switch-buttons">
                 <button onClick={() => setView("staff")}
