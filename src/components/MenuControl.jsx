@@ -127,14 +127,14 @@ export default function MenuControl({
                             {!available ? (
                                 <button
                                     className="restock-btn"
-                                    onClick={() => onUpdateMenuStock(itemId, true, item)}
+                                    onClick={() => onUpdateMenuStock(itemId, true)}
                                 >
                                     Restock
                                 </button>
                             ) : (
                                 <button
                                     className="out-of-stock-btn"
-                                    onClick={() => onUpdateMenuStock(itemId, false, item)}
+                                    onClick={() => onUpdateMenuStock(itemId, false)}
                                 >
                                     Mark Out of Stock
                                 </button>

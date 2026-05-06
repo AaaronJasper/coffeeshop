@@ -188,30 +188,30 @@ export function App() {
             .then((data) => {
                 console.log("MENU:", data);
                 setMenu(data);
+                setStockOverrides({});
+                localStorage.removeItem("stockOverrides");
             })
             .catch((error) => console.error("Failed to load menu:", error));
     }
 
     /**
-     * Updates stock by changing itemCount.
-     * itemCount 0 means out of stock, and 1 or more means available.
+     * Updates stock by changing the backend isAvailable field.
      */
-    function updateMenuStock(id, isAvailable, item) {
+    function updateMenuStock(id, isAvailable) {
         const nextOverrides = { ...stockOverrides, [id]: isAvailable };
-        const nextItemCount = isAvailable ? Math.max(Number(item.itemCount) || 1, 1) : 0;
 
         setStockOverrides(nextOverrides);
         localStorage.setItem("stockOverrides", JSON.stringify(nextOverrides));
         setMenu((currentMenu) =>
             currentMenu.map((menuItem) =>
                 getMenuItemId(menuItem) === id
-                    ? { ...menuItem, itemCount: nextItemCount, isAvailable }
+                    ? { ...menuItem, isAvailable }
                     : menuItem
             )
         );
 
         const formData = new FormData();
-        formData.append("itemCount", String(nextItemCount));
+        formData.append("isAvailable", String(isAvailable));
 
         apiFetch(`http://localhost:8080/api/menu/${id}`, {
             method: "PUT",
