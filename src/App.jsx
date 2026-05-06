@@ -1,166 +1,90 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 import { FiUnlock } from "react-icons/fi";
+import DashboardSidebar from "./components/DashboardSidebar";
+import LoginPage from "./components/LoginPage";
+import MenuControl from "./components/MenuControl";
+import OrderCard from "./components/OrderCard";
+import OrderModal from "./components/OrderModal";
 
+
+
+
+/**
+ * Sends an API request and adds the staff token when the user is logged in.
+ */
 async function apiFetch(path, options = {}) {
     const token = localStorage.getItem("staffToken");
-    const headers = { "Content-Type": "application/json", ...options.headers };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const isFormData = options.body instanceof FormData;
+
+    const headers = {
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
+        ...options.headers,
+    };
+
+    if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+    }
+
     const res = await fetch(path, { ...options, headers });
+
     if (!res.ok) {
         const text = await res.text();
-        throw new Error(text || res.statusText);
+        throw new Error(text || `Request failed: ${res.status}`);
     }
-    if (res.status === 204) return null;
-    return res.json();
-}
 
-
-function OrderCard({ order, updateStatus, isArchive, isAllView, onClick  }) {
-    return (
-
-        <div
-            className={`order-card ${isAllView ? "summary" : ""}`}
-            onClick={isAllView ? onClick : undefined}>
-
-            <div className="order-card-header">
-                <h3>Order {order.displayId || `#${order.id}`}</h3>
-                <span className="ordertime">{order.orderTime}</span>
-            </div>
-
-            <div className={`status-badge ${order.status}`}>
-                {order.status}
-            </div>
-
-            {!isAllView && (
-                <div className="items-list">
-                    {order.items.map((item, index) => (
-                        <p key={index}>{item}</p>
-                    ))}
-                </div>
-            )}
-
-            <p className="item-count">{order.items.length} items</p>
-            {!isAllView && !isArchive && (
-                <>
-                    <div className="card-actions">
-                        {order.backendStatus === "NEW" && (
-                            <button onClick={() => updateStatus(order.id, "accepted")}>
-                                Accept order
-                            </button>
-                        )}
-
-                        {order.backendStatus === "ACCEPTED" && (
-                            <button onClick={() => updateStatus(order.id, "in-progress")}>
-                                Start preparing
-                            </button>
-                        )}
-
-                        {order.backendStatus === "PREPARING" && (
-                            <button onClick={() => updateStatus(order.id, "ready")}>
-                                Mark as ready
-                            </button>
-                        )}
-
-                        {order.backendStatus === "READY" && (
-                            <button onClick={() => updateStatus(order.id, "archived")}>
-                                Collect
-                            </button>
-                        )}
-                    </div>
-
-                    {order.backendStatus !== "cancelled" && (
-                        <button
-                            className="cancel-btn"
-                            onClick={() => updateStatus(order.id, "cancelled")}
-                        >
-                            Cancel
-                        </button>
-                    )}
-                </>
-            )}
-        </div>
-    );
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
 }
 
 
 export function App() {
     const [view, setView] = useState("staff");
     const [activeTab, setActiveTab] = useState("all");
+    const [orders, setOrders] = useState([]);
     const [archivedOrders, setArchivedOrders] = useState([]);
     const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem("staffToken"));
     const [selectedOrder, setSelectedOrder] = useState(null);
-    const [orders, setOrders] = useState([]);
-
-    // auth form state
-    const [authTab, setAuthTab] = useState("login"); // "login" | "register"
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [firstname, setFirstname] = useState("");
-    const [lastname, setLastname] = useState("");
-    const [authError, setAuthError] = useState("");
-    const [authLoading, setAuthLoading] = useState(false);
-
-    function formatOrders(data) {
-        return data.map(order => ({
-            id: order.id,
-            displayId: `#${order.id}`,
-            backendStatus: order.status,
-            status: mapStatus(order.status),
-            orderTime: new Date(order.orderTime).toLocaleTimeString(),
-            items: order.items?.map(item =>
-                `${item.quantity} x ${item.menuItem?.name} (${item.size})`
-            ) || []
-        }));
-    }
-
-    function fetchActiveOrders() {
-        fetch("/api/staff/orders")
-            .then((res) => res.json())
-            .then((data) => setOrders(formatOrders(data)))
-            .catch((error) => console.error("Failed to load orders:", error));
-    }
-
-    useEffect(() => {
-        fetchActiveOrders();
-        const interval = setInterval(fetchActiveOrders, 10000);
-        return () => clearInterval(interval);
-    }, []);
-
-    useEffect(() => {
-        if (view === "archive") {
-            fetch("/api/staff/orders/archive")
-                .then(res => res.json())
-                .then(data => {
-                    const formatted = data.map(order => ({
-                        id: order.id,
-                        displayId: `#${order.id}`,
-                        backendStatus: order.status,
-                        status: mapStatus(order.status),
-                        orderTime: new Date(order.orderTime).toLocaleTimeString(),
-                        items: order.items?.map(
-                            item => `${item.quantity} x ${item.menuItem?.name} (${item.size})`
-                        ) || []
-                    }));
-
-                    setArchivedOrders(formatted);
-                })
-                .catch(err => console.error(err));
+    const [menu, setMenu] = useState([]);
+    const [stockOverrides, setStockOverrides] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem("stockOverrides")) || {};
+        } catch {
+            return {};
         }
-    }, [view]);
+    });
 
+    const getMenuItemId = (item) => item.itemId ?? item.id ?? item.menuItemId ?? item.name;
+    const isMenuItemAvailable = (item) => {
+        const itemId = getMenuItemId(item);
 
-    const currentOrders =
-        view === "archive" ? archivedOrders : orders;
+        if (stockOverrides[itemId] !== undefined) {
+            return stockOverrides[itemId];
+        }
 
-    const filteredOrders =
-        activeTab === "all"
-            ? currentOrders
-            : currentOrders.filter((order) => order.status === activeTab);
+        if (item.isAvailable !== undefined) {
+            return item.isAvailable === true || item.isAvailable === "true";
+        }
 
+        if (item.itemCount !== undefined) {
+            return Number(item.itemCount) > 0;
+        }
+
+        return true;
+    };
+
+    const isOutOfStock = (itemName) => {
+        const found = menu.find((m) => m.name === itemName);
+        return found ? !isMenuItemAvailable(found) : false;
+    };
+
+    /**
+     * Converts backend order status names into CSS-friendly names.
+     */
     function mapStatus(status) {
         switch (status) {
             case "NEW":
+                return "new";
             case "ACCEPTED":
                 return "accepted";
             case "PREPARING":
@@ -176,6 +100,213 @@ export function App() {
         }
     }
 
+    /**
+     * Gets the pickup time from the order response.
+     */
+    function getPickupTime(order) {
+        return order.pickupTime || order.pickUpTime || null;
+    }
+
+    /**
+     * Formats pickup time so it is easy for staff to read.
+     */
+    function formatPickupTime(time) {
+        if (!time) return "Not set";
+
+        const date = new Date(time);
+
+        if (!Number.isNaN(date.getTime())) {
+            return date.toLocaleTimeString("en-GB", {
+                timeZone: "Europe/London",
+                hour: "2-digit",
+                minute: "2-digit",
+            });
+        }
+
+        return String(time).slice(0, 5);
+    }
+
+    function getPickupSortTime(order) {
+        const pickupTime = getPickupTime(order);
+        const date = new Date(pickupTime);
+
+        if (pickupTime && !Number.isNaN(date.getTime())) {
+            return date.getTime();
+        }
+
+        return Number.MAX_SAFE_INTEGER;
+    }
+
+    /**
+     * Prepares backend order data for the dashboard cards.
+     */
+    function formatOrders(data) {
+        console.log("RAW:", data);
+
+        const formatted = data.map((order) => ({
+            id: order.id,
+            displayId: `#${order.id}`,
+            backendStatus: order.status,
+            status: mapStatus(order.status),
+            orderTime: new Date(order.orderTime).toLocaleTimeString("en-GB", {
+                timeZone: "Europe/London",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+            }),
+            pickupTime: formatPickupTime(getPickupTime(order)),
+            pickupSortTime: getPickupSortTime(order),
+
+            // formatOrders
+            items:
+                order.items?.map((item) => ({
+                    name: item.menuItem?.name || item.menuItemName || "Unknown item",
+                    quantity: item.quantity,
+                    size: item.size,
+                })) || [],
+        }));
+
+        console.log("FORMATTED:", formatted);
+        return formatted.sort((a, b) => a.pickupSortTime - b.pickupSortTime);
+    }
+
+    function fetchActiveOrders() {
+        apiFetch("http://localhost:8080/api/staff/orders")
+            .then((data) => setOrders(formatOrders(data)))
+            .catch((error) => console.error("Failed to load orders:", error));
+    }
+
+    function fetchArchivedOrders() {
+        apiFetch("http://localhost:8080/api/staff/orders/archive")
+            .then((data) => setArchivedOrders(formatOrders(data)))
+            .catch((error) => console.error("Failed to load archive:", error));
+    }
+
+
+    function fetchMenu() {
+        apiFetch("http://localhost:8080/api/menu")
+            .then((data) => {
+                console.log("MENU:", data);
+                setMenu(data);
+            })
+            .catch((error) => console.error("Failed to load menu:", error));
+    }
+
+    /**
+     * Updates stock by changing itemCount.
+     * itemCount 0 means out of stock, and 1 or more means available.
+     */
+    function updateMenuStock(id, isAvailable, item) {
+        const nextOverrides = { ...stockOverrides, [id]: isAvailable };
+        const nextItemCount = isAvailable ? Math.max(Number(item.itemCount) || 1, 1) : 0;
+
+        setStockOverrides(nextOverrides);
+        localStorage.setItem("stockOverrides", JSON.stringify(nextOverrides));
+        setMenu((currentMenu) =>
+            currentMenu.map((menuItem) =>
+                getMenuItemId(menuItem) === id
+                    ? { ...menuItem, itemCount: nextItemCount, isAvailable }
+                    : menuItem
+            )
+        );
+
+        const formData = new FormData();
+        formData.append("itemCount", String(nextItemCount));
+
+        apiFetch(`http://localhost:8080/api/menu/${id}`, {
+            method: "PUT",
+            body: formData,
+        })
+            .then(() => {
+                fetchMenu();
+                fetchActiveOrders();
+            })
+            .catch((error) => {
+                console.error("Failed to update menu stock:", error);
+            });
+    }
+
+    /**
+     * Adds a new menu item using the backend menu API.
+     */
+    function addMenuItem(menuForm) {
+        const formData = new FormData();
+        formData.append("name", menuForm.name);
+        formData.append("description", menuForm.description);
+        formData.append("imgUrl", menuForm.imgUrl);
+        formData.append("rating", menuForm.rating);
+        formData.append("category", menuForm.category);
+        formData.append("itemCount", menuForm.itemCount);
+
+        return apiFetch("http://localhost:8080/api/menu", {
+            method: "POST",
+            body: formData,
+        })
+            .then(() => {
+                fetchMenu();
+            })
+            .catch((error) => {
+                console.error("Failed to add menu item:", error);
+                throw error;
+            });
+    }
+
+    /**
+     * Removes a menu item after staff confirms the action.
+     */
+    function deleteMenuItem(id, name) {
+        const shouldDelete = window.confirm(`Remove ${name} from the menu?`);
+
+        if (!shouldDelete) return;
+
+        apiFetch(`http://localhost:8080/api/menu/${id}`, {
+            method: "DELETE",
+        })
+            .then(() => {
+                setMenu((currentMenu) =>
+                    currentMenu.filter((item) => getMenuItemId(item) !== id)
+                );
+                fetchMenu();
+            })
+            .catch((error) => console.error("Failed to delete menu item:", error));
+    }
+
+
+    useEffect(() => {
+        if (!isLoggedIn) return;
+
+        fetchActiveOrders();
+        const interval = setInterval(fetchActiveOrders, 3000);
+
+        return () => clearInterval(interval);
+    }, [isLoggedIn]);
+
+
+    useEffect(() => {
+        if (!isLoggedIn) return;
+
+        if (view === "archive") {
+            setActiveTab("all");
+            fetchArchivedOrders();
+        }
+
+        if (view === "staff") {
+            setActiveTab("all");
+            fetchActiveOrders();
+        }
+    }, [isLoggedIn, view]);
+
+
+
+    useEffect(() => {
+        if (!isLoggedIn) return;
+        fetchMenu();
+    }, [isLoggedIn]);
+
+
+    /**
+     * Sends the next order status to the backend.
+     */
     function updateStatus(id, newStatus) {
         const statusMap = {
             accepted: "ACCEPTED",
@@ -185,282 +316,89 @@ export function App() {
             archived: "COLLECTED",
         };
 
+
         const backendStatus = statusMap[newStatus];
 
-        fetch(`/api/staff/orders/${id}/status?status=${backendStatus}`, {
+
+        apiFetch(`/api/staff/orders/${id}/status?status=${backendStatus}`, {
             method: "PATCH",
         })
-            .then(() => fetchActiveOrders())
-            .catch((err) => console.error("Failed to update status:", err));
+            .then(() => {
+                fetchActiveOrders();
+                if (view === "archive") fetchArchivedOrders();
+            })
+            .catch((error) => console.error("Failed to update status:", error));
     }
 
+    const currentOrders = view === "archive" ? archivedOrders : orders;
 
-    async function handleLogin(e) {
-        e.preventDefault();
-        setAuthError("");
-        setAuthLoading(true);
-        try {
-            const data = await apiFetch("/api/v1/auth/authenticate", {
-                method: "POST",
-                body: JSON.stringify({ email, password }),
-            });
-            if (data.role !== "STAFF") {
-                setAuthError("Access denied. Staff accounts only.");
-                return;
-            }
-            localStorage.setItem("staffToken", data.token);
-            setIsLoggedIn(true);
-        } catch {
-            setAuthError("Invalid email or password.");
-        } finally {
-            setAuthLoading(false);
-        }
-    }
-
-    async function handleRegister(e) {
-        e.preventDefault();
-        setAuthError("");
-        setAuthLoading(true);
-        try {
-            const data = await apiFetch("/api/v1/auth/register", {
-                method: "POST",
-                body: JSON.stringify({ firstname, lastname, email, password, role: "STAFF" }),
-            });
-            localStorage.setItem("staffToken", data.token);
-            setIsLoggedIn(true);
-        } catch {
-            setAuthError("Registration failed. Email may already be in use.");
-        } finally {
-            setAuthLoading(false);
-        }
-    }
-
-    async function handleLogout() {
-        const token = localStorage.getItem("staffToken");
-        if (token) {
-            await fetch("/api/v1/auth/logout", {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${token}` },
-            }).catch(() => {});
-        }
-        localStorage.removeItem("staffToken");
-        setIsLoggedIn(false);
-        setEmail("");
-        setPassword("");
-        setFirstname("");
-        setLastname("");
-    }
+    const filteredOrders =
+        activeTab === "all"
+            ? currentOrders
+            : currentOrders.filter((order) => order.status === activeTab);
 
     if (!isLoggedIn) {
-        return (
-            <div className="login-page">
-                <div className="login-card">
-                    <h1>Whistlestop Coffee Hut</h1>
-                    <p>Staff Portal</p>
-
-                    <div className="auth-tabs">
-                        <button
-                            className={authTab === "login" ? "active" : ""}
-                            onClick={() => { setAuthTab("login"); setAuthError(""); }}
-                        >
-                            Login
-                        </button>
-                        <button
-                            className={authTab === "register" ? "active" : ""}
-                            onClick={() => { setAuthTab("register"); setAuthError(""); }}
-                        >
-                            Register
-                        </button>
-                    </div>
-
-                    <hr />
-
-                    {authTab === "login" ? (
-                        <form onSubmit={handleLogin}>
-                            <label>Email</label>
-                            <input
-                                type="email"
-                                placeholder="staff@example.com"
-                                value={email}
-                                onChange={e => setEmail(e.target.value)}
-                                required
-                            />
-                            <label>Password</label>
-                            <input
-                                type="password"
-                                placeholder="Enter your password"
-                                value={password}
-                                onChange={e => setPassword(e.target.value)}
-                                required
-                            />
-                            {authError && <p className="auth-error">{authError}</p>}
-                            <button type="submit" disabled={authLoading}>
-                                {authLoading ? "Signing in..." : "Login"}
-                            </button>
-                        </form>
-                    ) : (
-                        <form onSubmit={handleRegister}>
-                            <label>First Name</label>
-                            <input
-                                type="text"
-                                placeholder="First name"
-                                value={firstname}
-                                onChange={e => setFirstname(e.target.value)}
-                                required
-                            />
-                            <label>Last Name</label>
-                            <input
-                                type="text"
-                                placeholder="Last name"
-                                value={lastname}
-                                onChange={e => setLastname(e.target.value)}
-                                required
-                            />
-                            <label>Email</label>
-                            <input
-                                type="email"
-                                placeholder="staff@example.com"
-                                value={email}
-                                onChange={e => setEmail(e.target.value)}
-                                required
-                            />
-                            <label>Password</label>
-                            <input
-                                type="password"
-                                placeholder="Choose a password"
-                                value={password}
-                                onChange={e => setPassword(e.target.value)}
-                                required
-                            />
-                            {authError && <p className="auth-error">{authError}</p>}
-                            <button type="submit" disabled={authLoading}>
-                                {authLoading ? "Registering..." : "Create Staff Account"}
-                            </button>
-                        </form>
-                    )}
-                </div>
-            </div>
-        );
+        return <LoginPage onLogin={() => setIsLoggedIn(true)}/>;
     }
+
     return (
         <div className="container">
             <h1 className="header">Whistlestop Coffee Hut</h1>
 
-            <div className="switch-buttons">
-                <button onClick={() => setView("staff")}
-                        className={view === "staff" ? "active" : ""}>
-                    Staff Dashboard
-                </button>
+            <div className="dashboard-layout">
+                <DashboardSidebar
+                    view={view}
+                    activeTab={activeTab}
+                    setView={setView}
+                    setActiveTab={setActiveTab}
+                />
 
-                <button onClick={() => setView("archive")}
-                        className={`nav ${view === "archive" ? "active" : ""}`}>
-                    Archive Dashboard
-                </button>
-            </div>
-
-
-
-
-                    <div className="tabs">
-                        {view === "staff" && (
-                            <>
-                        <button
-                            onClick={() => setActiveTab("all")}
-                            className={activeTab === "all" ? "active" : ""}
-                        >
-                            All
-                        </button>
-
-                        <button
-                            onClick={() => setActiveTab("accepted")}
-                            className={`nav ${activeTab === "accepted" ? "active" : ""}`}
-                        >
-                            Accepted
-                        </button>
-
-                        <button
-                            onClick={() => setActiveTab("in-progress")}
-                            className={`nav ${activeTab === "in-progress" ? "active" : ""}`}
-                        >
-                            In Progress
-                        </button>
-
-                        <button
-                            onClick={() => setActiveTab("ready")}
-                            className={`nav ${activeTab === "ready" ? "active" : ""}`}
-                        >
-                            Ready for Collection
-                        </button>
-
-                    </>
-                    )}
-
-                    {view === "archive" && (
-                        <>
-                        <button
-                            onClick={() => setActiveTab("all")}
-                            className={activeTab === "all" ? "active" : ""}
-                        >
-                            All
-                        </button>
-
-                            <button
-                                onClick={() => setActiveTab("completed")}
-                                className={activeTab === "completed" ? "active" : ""}
-                            >
-                                Completed
-                            </button>
-
-                            <button
-                                onClick={() => setActiveTab("cancelled")}
-                                className={activeTab === "cancelled" ? "active" : ""}
-                            >
-                                Cancelled
-                            </button>
-                        </>
-                    )}
-                    </div>
-
-                <div className="order-grid">
-                    {filteredOrders.map((order) => (
-                        <OrderCard key={order.id}
-                                   order={order}
-                                   updateStatus={updateStatus}
-                                   isArchive={view === "archive"}
-                                   isAllView={view === "staff" && activeTab === "all"}
-                                   onClick={() => setSelectedOrder(order)}
+                <div className="dashboard-content">
+                    {view === "menu" ? (
+                        <MenuControl
+                            menu={menu}
+                            getMenuItemId={getMenuItemId}
+                            isMenuItemAvailable={isMenuItemAvailable}
+                            onAddMenuItem={addMenuItem}
+                            onDeleteMenuItem={deleteMenuItem}
+                            onUpdateMenuStock={updateMenuStock}
                         />
-
-                    ))}
+                    ) : (
+                        <div className="order-grid">
+                            {filteredOrders.map((order) => (
+                                <OrderCard
+                                    key={order.id}
+                                    order={order}
+                                    updateStatus={updateStatus}
+                                    isArchive={view === "archive"}
+                                    isAllView={view === "staff" && activeTab === "all"}
+                                    isOutOfStock={isOutOfStock}
+                                    onClick={() => setSelectedOrder(order)}
+                                />
+                            ))}
+                        </div>
+                    )}
                 </div>
-
-
+            </div>
 
             <button
                 className="logout-btn"
-                onClick={handleLogout}>
-                <FiUnlock />
-                Logout
+                onClick={() => {
+                    localStorage.removeItem("staffToken");
+                    setIsLoggedIn(false);
+                }}>
+
+                <FiUnlock/> Logout
+
             </button>
+
             {selectedOrder && (
-                <div className="modal-overlay" onClick={() => setSelectedOrder(null)}>
-                    <div className="modal" onClick={(e) => e.stopPropagation()}>
-                        <h2>Order {selectedOrder.id}</h2>
-                        <p>Time: {selectedOrder.orderTime}</p>
-                        <p>Status: {selectedOrder.status}</p>
-
-                        <div>
-                            {selectedOrder.items.map((item, index) => (
-                                <p key={index}>{item}</p>
-                            ))}
-                        </div>
-
-                        <button onClick={() => setSelectedOrder(null)}>Close</button>
-                    </div>
-                </div>
+                <OrderModal order={selectedOrder} onClose={() => setSelectedOrder(null)}/>
             )}
         </div>
-
-
     );
+
 }
+
+
+export default App;
